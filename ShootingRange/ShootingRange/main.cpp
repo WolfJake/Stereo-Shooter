@@ -1,10 +1,25 @@
-#include <stdio.h>
-#include <time.h>
-#include <math.h>
-#include "vector.h"
-#include <GLUT/GLUT.h>
-#include <OpenGL/OpenGL.h>
+#include <cstdlib>
+#include <iostream>
+#include <fstream>
 
+#ifdef __APPLE__
+#  include <GLUT/glut.h>
+#else
+#  include <GL/glut.h>
+#endif
+
+
+
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <math.h>
+#include "time.h"
+#include "windows.h"
+#include "gl/glu.h"
+#include "vector.h"
+
+using namespace std;
 
 //Constants
 #define NORMALSIZE 10.0
@@ -18,6 +33,17 @@
 #define EYESWITCH 0.02
 #define FARBACK 30
 
+#define BUFFER_LENGTH 64
+#define checkImageX 64
+#define checkImageY 64
+#define PI 3.14159265
+#define TEXTURAS 11
+
+//////VARIABLES PARA TEXTURA///////////////////////
+static GLubyte checkImage[checkImageX][checkImageY][3];
+static GLuint texName;
+static unsigned int texture[TEXTURAS];
+////////////////////////////////////////////////////
 
 //Control Variables
 bool stereo = false;
@@ -46,6 +72,106 @@ void mouse(int button, int state, int x, int y);
 void createEnemies();
 void incomingEnemies();
 void trueColor(int red, int green, int blue);
+void ligths();
+
+//////////////Fucniones para cargar textura/////////////////
+
+// Struct of bitmap file.
+struct BitMapFile{
+   int sizeX;
+   int sizeY;
+   unsigned char *data;
+};
+
+// Routine to read a bitmap file.
+// Works only for uncompressed bmp files of 24-bit color.
+BitMapFile *getBMPData(string filename){
+
+   BitMapFile *bmp = new BitMapFile;
+   unsigned int size, offset, headerSize;
+  
+   // Read input file name.
+   ifstream infile(filename.c_str(), ios::binary);
+ 
+   // Get the starting point of the image data.
+   infile.seekg(10);
+   infile.read((char *) &offset, 4); 
+   
+   // Get the header size of the bitmap.
+   infile.read((char *) &headerSize,4);
+
+   // Get width and height values in the bitmap header.
+   infile.seekg(18);
+   infile.read( (char *) &bmp->sizeX, 4);
+   infile.read( (char *) &bmp->sizeY, 4);
+
+   // Allocate buffer for the image.
+   size = bmp->sizeX * bmp->sizeY * 24;
+   bmp->data = new unsigned char[size];
+
+   // Read bitmap data.
+   infile.seekg(offset);
+   infile.read((char *) bmp->data , size);
+   
+   // Reverse color from bgr to rgb.
+   int temp;
+   for (int i = 0; i < size; i += 3){ 
+      temp = bmp->data[i];
+	  bmp->data[i] = bmp->data[i+2];
+	  bmp->data[i+2] = temp;
+   }
+
+   return bmp;
+}
+
+// Load external textures.
+void loadExternalTextures(string filename, int TexIndex)	{
+   
+	BitMapFile *image[1];		// Local storage for bmp image data.
+   image[0] = getBMPData(filename);		// Load the textures.
+
+   // Activate texture index texture[0]. 
+   glBindTexture(GL_TEXTURE_2D, texture[TexIndex]);
+
+
+   // Set texture parameters for wrapping.
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,  GL_REPEAT);
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+   // Set texture parameters for filtering.
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+   
+
+   // Specify an image as the texture to be bound with the currently active texture index.
+   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image[0]->sizeX, image[0]->sizeY, 0, 
+	            GL_RGB, GL_UNSIGNED_BYTE, image[0]->data);	
+}
+
+void setup(void){    
+   glEnable(GL_DEPTH_TEST);
+   glShadeModel(GL_FLAT);
+   glClearColor(0.0, 0.0, 0.0, 0.0); 
+
+   glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+   glGenTextures(TEXTURAS, texture); 
+
+   // Load external texture and generate and load procedural texture.
+   loadExternalTextures("Texturas/fantasma3.bmp",0);
+   loadExternalTextures("Texturas/fantasma4.bmp",1);
+   loadExternalTextures("Texturas/ladrillo.bmp",2);
+   loadExternalTextures("Texturas/cemento.bmp",3);
+   loadExternalTextures("Texturas/suelo.bmp",4);
+   loadExternalTextures("Texturas/agua.bmp",5);
+   loadExternalTextures("Texturas/marmol.bmp",6);
+   loadExternalTextures("Texturas/grass.bmp",7);
+
+   // Specify how texture values combine with current surface color values.
+   glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
+}
+
+
+////////////////////////////////////////////////////////////
 
 
 //Creates the viewport and set the stereoscopy display mode on.
@@ -61,13 +187,16 @@ int main(int argc, char **argv)
     glutInitWindowSize(screenWidth, screenHeight);
     
     glutCreateWindow(argv[0]);
-    glutDisplayFunc(display);
+	setup();
+	glutDisplayFunc(display);
     glutKeyboardFunc(keyboard);
     glutMouseFunc(mouse);
     init(screenWidth, screenHeight);
     glutMainLoop();
     return 0; 
 }
+
+
 
 
 //Initializes cetain components: creates random seed, defines targets' positions, enables depth test.
@@ -106,10 +235,14 @@ void init(int w, int h)
 //Display Func: Draws buffer for left and right eyes with appropiate EYEOFFSET and swaps between them.
 void display()
 {
+	
     //Back buffer for left eye
     glDrawBuffer(GL_BACK_LEFT);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     
+	ligths();
+	glEnable(GL_LIGHT4);
+
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
     draw();
@@ -120,7 +253,9 @@ void display()
     glTranslatef(EYEOFFSET, 0.0f, 0.0f);
     gluLookAt(cameraPos.x, cameraPos.y, cameraPos.z, lookAt.x, lookAt.y, lookAt.z, cameraUp.x, cameraUp.y, cameraUp.z);
     
-    //Back buffer for right eye
+    
+	
+	//Back buffer for right eye
     
     if (stereo) {
         glDrawBuffer(GL_BACK_RIGHT);
@@ -143,109 +278,141 @@ void display()
     glutSwapBuffers();
 }
 
+void ligths(){
+	GLfloat luz5Difusa[]     = { 1.0f, 1.0f, 0.0f, 1.0f };
+	GLfloat luz5Especular[]  = { 1.0f, 1.0f, 0.0f, 1.0f };  //luz AMARILLA
+	GLfloat luz5posicion[]   = { 0.0, NORMALSIZE, -Z, 0.0f }; //Posición luz 5
+    GLfloat luz5Direccion[]  = {0.0f, 0.0f,-1.0f};
+
+	
+    
+    glEnable(GL_NORMALIZE);
+    glEnable(GL_COLOR_MATERIAL);
+    glEnable(GL_LIGHTING);
+    GLfloat lmodel_ambient[] = { 0.5, 0.5, 0.5, 1.0 };
+    glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
+    glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_FALSE);
+
+	glLightfv(GL_LIGHT4, GL_DIFFUSE,  luz5Difusa);
+	glLightfv(GL_LIGHT4, GL_SPECULAR, luz5Especular);
+	glLightfv(GL_LIGHT4, GL_POSITION, luz5posicion);
+	glLightf (GL_LIGHT4, GL_SPOT_EXPONENT, 50.0f);
+	glLightf (GL_LIGHT4, GL_SPOT_CUTOFF, 100.0);
+	glLightfv(GL_LIGHT4, GL_SPOT_DIRECTION, luz5Direccion);
+
+	GLfloat mat_ambient[]    = { 0.7f, 0.7f, 0.7f, 1.0f };
+	GLfloat mat_diffuse[]    = { 0.8f, 0.8f, 0.8f, 1.0f };
+	GLfloat mat_specular[]   = { 1.0f, 1.0f, 1.0f, 1.0f };
+	GLfloat high_shininess[] = { 100.0f };
+
+	glMaterialfv(GL_FRONT, GL_AMBIENT,   mat_ambient);
+    glMaterialfv(GL_FRONT, GL_DIFFUSE,   mat_diffuse);
+    glMaterialfv(GL_FRONT, GL_SPECULAR,  mat_specular);
+    glMaterialfv(GL_FRONT, GL_SHININESS, high_shininess);
+}
 
 //Draws Scene
 void draw()
 {
-    //Shooting Room
+
+	glEnable(GL_DEPTH_TEST);	// Hidden surface removal
+	glFrontFace(GL_CCW);		// Counter clock-wise polygons face out
+	//glEnable(GL_CULL_FACE);		// Do not calculate inside of jet
+    //glDepthFunc(GL_LESS);
+
+	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); 
+	//glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE); 
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+	glClearColor(1.0f,1.0f,1.0f,1.0f );
+	glMatrixMode(GL_MODELVIEW);
+
+     //Shooting Room
     glPushMatrix();
     glTranslatef(0.0, 0.0, -Z);
-    
+
+
+	//glBindTexture(GL_TEXTURE_2D, texture[0]);
+    glBindTexture(GL_TEXTURE_2D, texture[3]);
+	glEnable(GL_TEXTURE_2D);
     glBegin(GL_POLYGON);
-    trueColor(77, 52, 15);              glVertex3f(NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
-    trueColor(77, 52, 15);              glVertex3f(NORMALSIZE, NORMALSIZE, -NORMALSIZE);
-    trueColor(77, 52, 15);              glVertex3f(-NORMALSIZE, NORMALSIZE, -NORMALSIZE);
-    trueColor(77, 52, 15);              glVertex3f(-NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(1.0,0.0);              glVertex3f(NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(1.0,1.0);              glVertex3f(NORMALSIZE, NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(0.0,1.0);              glVertex3f(-NORMALSIZE, NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(0.0,0.0);              glVertex3f(-NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
     glEnd();
-    
+	glDisable(GL_TEXTURE_2D);
+
+	//WALL RIGHT
+	glBindTexture(GL_TEXTURE_2D, texture[6]);
+	glEnable(GL_TEXTURE_2D);    
     glBegin(GL_POLYGON);
-    trueColor(77, 52, 15);              glVertex3f(NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
-    trueColor(77, 52, 15);              glVertex3f(NORMALSIZE, NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(1.0,0.0);              glVertex3f(NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(0.0,0.0);             glVertex3f(NORMALSIZE, NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(0.0,1.0);            glVertex3f(NORMALSIZE, NORMALSIZE, NORMALSIZE);
+    glTexCoord2f(1.0,1.0);            glVertex3f(NORMALSIZE, -NORMALSIZE, NORMALSIZE);
+    glEnd();
+	glDisable(GL_TEXTURE_2D);
+    
+	//WALL LEFT
+	glEnable(GL_TEXTURE_2D);
+	glBegin(GL_POLYGON);
+    glTexCoord2f(0.0,0.0);            glVertex3f(-NORMALSIZE, -NORMALSIZE, NORMALSIZE);
+    glTexCoord2f(0.0,1.0);            glVertex3f(-NORMALSIZE, NORMALSIZE, NORMALSIZE);
+    glTexCoord2f(1.0,1.0);            glVertex3f(-NORMALSIZE, NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(1.0,0.0);            glVertex3f(-NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
+    glEnd();
+	glDisable(GL_TEXTURE_2D);
+    
+	//roof
+    glBegin(GL_POLYGON);
     trueColor(218, 148, 44);            glVertex3f(NORMALSIZE, NORMALSIZE, NORMALSIZE);
-    trueColor(218, 148, 44);            glVertex3f(NORMALSIZE, -NORMALSIZE, NORMALSIZE);
-    glEnd();
-    
-    glBegin(GL_POLYGON);
-    trueColor(218, 148, 44);            glVertex3f(-NORMALSIZE, -NORMALSIZE, NORMALSIZE);
-    trueColor(218, 148, 44);            glVertex3f(-NORMALSIZE, NORMALSIZE, NORMALSIZE);
-    trueColor(77, 52, 15);              glVertex3f(-NORMALSIZE, NORMALSIZE, -NORMALSIZE);
-    trueColor(77, 52, 15);              glVertex3f(-NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
-    glEnd();
-    
-    glBegin(GL_POLYGON);
-    trueColor(218, 148, 44);            glVertex3f(NORMALSIZE, NORMALSIZE, NORMALSIZE);
     trueColor(77, 52, 15);              glVertex3f(NORMALSIZE, NORMALSIZE, -NORMALSIZE);
     trueColor(77, 52, 15);              glVertex3f(-NORMALSIZE, NORMALSIZE, -NORMALSIZE);
     trueColor(218, 148, 44);            glVertex3f(-NORMALSIZE, NORMALSIZE, NORMALSIZE);
     glEnd();
-    
+	/*glBindTexture(GL_TEXTURE_2D, texture[3]);
+	glEnable(GL_TEXTURE_2D);
     glBegin(GL_POLYGON);
-    trueColor(77, 52, 15);              glVertex3f(NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
-    trueColor(218, 148, 44);            glVertex3f(NORMALSIZE, -NORMALSIZE, NORMALSIZE);
-    trueColor(218, 148, 44);            glVertex3f(-NORMALSIZE, -NORMALSIZE, NORMALSIZE);
-    trueColor(77, 52, 15);              glVertex3f(-NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(1.0,0.0);              glVertex3f(NORMALSIZE, NORMALSIZE, NORMALSIZE);
+    glTexCoord2f(1.0,1.0);              glVertex3f(NORMALSIZE, NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(0.0,1.0);              glVertex3f(-NORMALSIZE, NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(0.0,0.0);            glVertex3f(-NORMALSIZE, NORMALSIZE, NORMALSIZE);
     glEnd();
+	glDisable(GL_TEXTURE_2D);*/
     
-    //Edge Bars
-    trueColor(0, 0, 0);
-    glPushMatrix();
-    glTranslatef(NORMALSIZE, NORMALSIZE, 0);
-    glScalef(1.0, 1.0, NORMALSIZE * 2 / 0.05);
-    glutSolidCube(0.05);
-    glPopMatrix();
+	//FLOOR
+    glBindTexture(GL_TEXTURE_2D, texture[5]);
+	glEnable(GL_TEXTURE_2D);
+	glBegin(GL_POLYGON);
+	glColor3f(0.8f,0.8f,0.7f);
+	glTexCoord2f(1.0, 1.0);            glVertex3f(NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(1.0, 0.0);            glVertex3f(NORMALSIZE, -NORMALSIZE, NORMALSIZE);
+    glTexCoord2f(0.0, 0.0);            glVertex3f(-NORMALSIZE, -NORMALSIZE, NORMALSIZE);
+    glTexCoord2f(0.0, 1.0);            glVertex3f(-NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
+	
+		
+    glEnd();
+	glDisable(GL_TEXTURE_2D);
     
-    glPushMatrix();
-    glTranslatef(-NORMALSIZE, NORMALSIZE, 0);
-    glScalef(1.0, 1.0, NORMALSIZE * 2 / 0.05);
-    glutSolidCube(0.05);
-    glPopMatrix();
-    
-    glPushMatrix();
-    glTranslatef(NORMALSIZE, -NORMALSIZE, 0);
-    glScalef(1.0, 1.0, NORMALSIZE * 2 / 0.05);
-    glutSolidCube(0.05);
-    glPopMatrix();
-    
-    glPushMatrix();
-    glTranslatef(-NORMALSIZE, -NORMALSIZE, 0);
-    glScalef(1.0, 1.0, NORMALSIZE * 2 / 0.05);
-    glutSolidCube(0.05);
-    glPopMatrix();
-    
-    glPushMatrix();
-    glTranslatef(NORMALSIZE, 0, -NORMALSIZE);
-    glScalef(1.0, NORMALSIZE * 2 / 0.05, 1.0);
-    glutSolidCube(0.05);
-    glPopMatrix();
-    
-    glPushMatrix();
-    glTranslatef(-NORMALSIZE, 0, -NORMALSIZE);
-    glScalef(1.0, NORMALSIZE * 2 / 0.05, 1.0);
-    glutSolidCube(0.05);
-    glPopMatrix();
-    
-    glPushMatrix();
-    glTranslatef(0, NORMALSIZE, -NORMALSIZE);
-    glScalef(NORMALSIZE * 2 / 0.05, 1.0, 1.0);
-    glutSolidCube(0.05);
-    glPopMatrix();
-    
-    glPushMatrix();
-    glTranslatef(0, -NORMALSIZE, -NORMALSIZE);
-    glScalef(NORMALSIZE * 2 / 0.05, 1.0, 1.0);
-    glutSolidCube(0.05);
-    glPopMatrix();
+
     
     
+
     //Shooting Targets
     for (int i = 0; i < VERSUS; i++)
     {
+		
+			
         //If target has been shot, it is colored red; otherwise colored white
         if (dead[i] == true)
         {
-            glColor3f(1.0, 0.0, 0.0);
+
+			glBindTexture(GL_TEXTURE_2D, texture[1]);
+			
+            
         } else {
-            glColor3f(1.0, 1.0, 1.0);
+			glBindTexture(GL_TEXTURE_2D, texture[0]);
+            //glColor3f(1.0, 1.0, 1.0);
         }
         glLoadName(i + 1);
         glPushMatrix();
@@ -257,8 +424,22 @@ void draw()
         vector3d cruiseDirection = farBack - sphere;
         cruiseDirection.normalize();
         
+		//Initialization
+		
+
+		glEnable(GL_TEXTURE_2D);
+		glEnable(GL_TEXTURE_GEN_S);
+		glEnable(GL_TEXTURE_GEN_T);
+
+
         glTranslatef(sphere.x + cruiseDirection.x * nearDelta, sphere.y + cruiseDirection.y * nearDelta, sphere.z + cruiseDirection.z * nearDelta);
         glutSolidSphere(BUBBLE, 16, 16);
+
+		glDisable(GL_TEXTURE_GEN_S);
+		glDisable(GL_TEXTURE_GEN_T);
+		glDisable(GL_TEXTURE_2D);
+
+        
         glPopMatrix();
     }
     
@@ -323,7 +504,7 @@ void mouse(int button, int state, int x, int y)
                 
                 int i;
                 
-                float longShot = - INFINITY;
+                float longShot = - 99999999;
                 int nearIndex = VERSUS;
                 
                 for (i = 0; i < VERSUS; i++) {
