@@ -1,80 +1,76 @@
+#include <stdio.h>
 #include <cstdlib>
 #include <iostream>
 #include <fstream>
-
-#ifdef __APPLE__
-#  include <GLUT/glut.h>
-#else
-#  include <GL/glut.h>
-#endif
-
-
-
-
-#include <stdio.h>
-#include <stdlib.h>
+#include <time.h>
 #include <math.h>
-#include "time.h"
-#include "windows.h"
-#include "gl/glu.h"
 #include "vector.h"
+//MAC
+//#include <GLUT/GLUT.h>
+//#include <OpenGL/OpenGL.h>
+//Windows
+#include <Windows.h>
+#include <gl/GL.h>
+#include <gl/GLU.h>
+#include <gl/glut.h>
 
 using namespace std;
 
 //Constants
+//The scale at which everything is scaled in the application
 #define NORMALSIZE 10.0
-#define EYEOFFSET 0.5
+//The visual offset between both spectaror's eyes
+#define EYEOFFSET 0.6
+//The dimensions of the frustum
 #define X 10.0
 #define Y 10.0
 #define Z 5
-#define VERSUS 20
+//Number of targets
+#define VERSUS 30
+//Radius of the target and its shooting interception zone
 #define BUBBLE 1.0
-#define BARRACKS 30
+//Range length for targets to be created behind the back wall in the animation
+#define BARRACKS 40
+//Z-offset between both eyes to avoid images mixing with each other.
 #define EYESWITCH 0.02
+//The final Z destination at which all targets approach. This is done to simulate a conic approach
 #define FARBACK 30
-
-#define BUFFER_LENGTH 64
-#define checkImageX 64
-#define checkImageY 64
-#define PI 3.14159265
-#define TEXTURAS 11
-
-//////VARIABLES PARA TEXTURA///////////////////////
-static GLubyte checkImage[checkImageX][checkImageY][3];
-static GLuint texName;
-static unsigned int texture[TEXTURAS];
-////////////////////////////////////////////////////
+//Translation of targets in the line at each renderization of the display
+#define VELOCITY 0.05
+//Number of textures to be loaded
+#define TEXTURES 8
 
 //Control Variables
-bool stereo = false;
+//Is stereoscopy enabled?
+bool stereo = true;
 
-static GLfloat screenWidth = 800.0;
-static GLfloat screenHeight = 800.0;
+//Screen initial and consequent dimensions
+static GLfloat screenWidth = 1920.0;
+static GLfloat screenHeight = 1080.0;
 
+//Vector created with FARBACK to approach all targets to a point behind the camera
 vector3d farBack = vector3d(0, 0, FARBACK);
 
+//Array which stores the spatial position of all targets
 vector3d spheres[VERSUS];
+
+//Array which stores if the target has been shot
 bool dead[VERSUS];
+
+//Array which stores the z position at which the sphere was succesfully shot
+float firePlace[VERSUS];
+
+//Float value which determines the translation of the targets to their final ddestiantion. It is increases by a small amount everytime the idle function is called
 float nearDelta = 0.0;
 
+//Values to determine the postion, direction and up vector of the camera.
 vector3d cameraPos = vector3d(0, 0, 0.0001);
 vector3d cameraUp = vector3d(0, 1, 0);
 vector3d lookAt = vector3d(0, 0, -(NORMALSIZE * 2 - Z) / 2);
 
+//Array which stores the allocation of the .bmp files to be used as textures
+static unsigned int texture[TEXTURES];
 
-//Methods's Definitions
-int main(int argc, char **argv);
-void init(int w, int h);
-void display();
-void draw();
-void keyboard(unsigned char key, int x, int y);
-void mouse(int button, int state, int x, int y);
-void createEnemies();
-void incomingEnemies();
-void trueColor(int red, int green, int blue);
-void ligths();
-
-//////////////Fucniones para cargar textura/////////////////
 
 // Struct of bitmap file.
 struct BitMapFile{
@@ -83,95 +79,22 @@ struct BitMapFile{
    unsigned char *data;
 };
 
-// Routine to read a bitmap file.
-// Works only for uncompressed bmp files of 24-bit color.
-BitMapFile *getBMPData(string filename){
 
-   BitMapFile *bmp = new BitMapFile;
-   unsigned int size, offset, headerSize;
-  
-   // Read input file name.
-   ifstream infile(filename.c_str(), ios::binary);
- 
-   // Get the starting point of the image data.
-   infile.seekg(10);
-   infile.read((char *) &offset, 4); 
-   
-   // Get the header size of the bitmap.
-   infile.read((char *) &headerSize,4);
-
-   // Get width and height values in the bitmap header.
-   infile.seekg(18);
-   infile.read( (char *) &bmp->sizeX, 4);
-   infile.read( (char *) &bmp->sizeY, 4);
-
-   // Allocate buffer for the image.
-   size = bmp->sizeX * bmp->sizeY * 24;
-   bmp->data = new unsigned char[size];
-
-   // Read bitmap data.
-   infile.seekg(offset);
-   infile.read((char *) bmp->data , size);
-   
-   // Reverse color from bgr to rgb.
-   int temp;
-   for (int i = 0; i < size; i += 3){ 
-      temp = bmp->data[i];
-	  bmp->data[i] = bmp->data[i+2];
-	  bmp->data[i+2] = temp;
-   }
-
-   return bmp;
-}
-
-// Load external textures.
-void loadExternalTextures(string filename, int TexIndex)	{
-   
-	BitMapFile *image[1];		// Local storage for bmp image data.
-   image[0] = getBMPData(filename);		// Load the textures.
-
-   // Activate texture index texture[0]. 
-   glBindTexture(GL_TEXTURE_2D, texture[TexIndex]);
-
-
-   // Set texture parameters for wrapping.
-   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,  GL_REPEAT);
-   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
-
-   // Set texture parameters for filtering.
-   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-   glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-   
-
-   // Specify an image as the texture to be bound with the currently active texture index.
-   glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image[0]->sizeX, image[0]->sizeY, 0, 
-	            GL_RGB, GL_UNSIGNED_BYTE, image[0]->data);	
-}
-
-void setup(void){    
-   glEnable(GL_DEPTH_TEST);
-   glShadeModel(GL_FLAT);
-   glClearColor(0.0, 0.0, 0.0, 0.0); 
-
-   glPixelStorei(GL_UNPACK_ALIGNMENT,1);
-   glGenTextures(TEXTURAS, texture); 
-
-   // Load external texture and generate and load procedural texture.
-   loadExternalTextures("Texturas/fantasma3.bmp",0);
-   loadExternalTextures("Texturas/fantasma4.bmp",1);
-   loadExternalTextures("Texturas/ladrillo.bmp",2);
-   loadExternalTextures("Texturas/cemento.bmp",3);
-   loadExternalTextures("Texturas/suelo.bmp",4);
-   loadExternalTextures("Texturas/agua.bmp",5);
-   loadExternalTextures("Texturas/marmol.bmp",6);
-   loadExternalTextures("Texturas/grass.bmp",7);
-
-   // Specify how texture values combine with current surface color values.
-   glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
-}
-
-
-////////////////////////////////////////////////////////////
+//Methods's Definitions
+int main(int argc, char **argv);
+void init(int w, int h);
+void setup();
+void display();
+void lights();
+void draw();
+void reshape(int width, int height);
+void keyboard(unsigned char key, int x, int y);
+void mouse(int button, int state, int x, int y);
+void createEnemies();
+void incomingEnemies();
+void trueColor(int red, int green, int blue);
+BitMapFile *getBMPData(string filename);
+void loadExternalTextures(string filename, int TexIndex);
 
 
 //Creates the viewport and set the stereoscopy display mode on.
@@ -187,8 +110,8 @@ int main(int argc, char **argv)
     glutInitWindowSize(screenWidth, screenHeight);
     
     glutCreateWindow(argv[0]);
-	setup();
-	glutDisplayFunc(display);
+    glutDisplayFunc(display);
+	glutReshapeFunc(reshape);
     glutKeyboardFunc(keyboard);
     glutMouseFunc(mouse);
     init(screenWidth, screenHeight);
@@ -197,26 +120,37 @@ int main(int argc, char **argv)
 }
 
 
-
-
-//Initializes cetain components: creates random seed, defines targets' positions, enables depth test.
+//Initializes cetain components: , defines targets' positions, enables depth test.
 void init(int w, int h)
 {
+	//Creates random seed
     srand((unsigned int)time(NULL));
+
+	//Calls createEnemies function (explained throughly on its implementation)
     createEnemies();
     
+	//Sets RGBA color value and initial dimensions of the viewport) 
     glClearColor(0.f, 0.f, 0.f, 0.f);
     glViewport(0, 0, w, h);
     
+	//Signals that the following code is to be displayed to the left eye buffer
  	glDrawBuffer(GL_BACK_LEFT);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     
+	//Sets the frustum with its corresponding constants
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
+
+	//Frustum with center in (0, 0, (NORMALSIZE * 2 + Z) / 2))
     glFrustum(-X, X, -Y, Y, Z, NORMALSIZE * 2);
+
+	//Translation to represent the left eye OFFSET constant
     glTranslatef(EYEOFFSET, 0.0f, 0.0f);
+
+	//Setting the camera
     gluLookAt(cameraPos.x + EYEOFFSET, cameraPos.y, cameraPos.z, lookAt.x, lookAt.y, lookAt.z, cameraUp.x, cameraUp.y, cameraUp.z);
     
+	//Signals that the following code is to be displayed to the right eye buffer. If stereoscopy is disabled, the right eye is shown the same buffers as the left eye
     if (stereo) {
         glDrawBuffer(GL_BACK_RIGHT);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
@@ -224,48 +158,84 @@ void init(int w, int h)
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
         glFrustum(-X, X, -Y, Y, Z, NORMALSIZE * 2);
+
+		//Translation to represent the right eye OFFSET constant and the z EYESWITCH offset to prevent the images merging
         glTranslatef(-EYEOFFSET, 0.0f, -EYESWITCH);
         gluLookAt(cameraPos.x - EYEOFFSET, cameraPos.y, cameraPos.z, lookAt.x, lookAt.y, lookAt.z, cameraUp.x, cameraUp.y, cameraUp.z - EYESWITCH);
     }
     
+	//Enables the GL_DEPTH_TEST so that application conceals and shows images depending on their simulated depth
     glEnable(GL_DEPTH_TEST);
+
+	//Calls setup function (explained throughly on its implementation)
+	setup();
+}
+
+
+//Setting up textures array for further use
+void setup(void){    
+   glEnable(GL_DEPTH_TEST);
+   glShadeModel(GL_FLAT);
+   glClearColor(0.0, 0.0, 0.0, 0.0); 
+
+   glPixelStorei(GL_UNPACK_ALIGNMENT,1);
+   glGenTextures(TEXTURES, texture); 
+
+   // Load external texture and generate and load procedural texture.
+   loadExternalTextures("Textures/Spot.bmp",0);
+   loadExternalTextures("Textures/BloodSpot.bmp",1);
+   loadExternalTextures("Textures/BrickWall.bmp",2);
+   loadExternalTextures("Textures/Concrete.bmp",3);
+   loadExternalTextures("Textures/Ground.bmp",4);
+   loadExternalTextures("Textures/Water.bmp",5);
+   loadExternalTextures("Textures/Ivory.bmp",6);
+   loadExternalTextures("Textures/Grass.bmp",7);
+
+   // Specify how texture values combine with current surface color values.
+   glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE);
 }
 
 
 //Display Func: Draws buffer for left and right eyes with appropiate EYEOFFSET and swaps between them.
 void display()
 {
-	
     //Back buffer for left eye
     glDrawBuffer(GL_BACK_LEFT);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-    
-	ligths();
-	glEnable(GL_LIGHT4);
 
+	//Calls lights function (explained throughly on its implementation)
+	lights();
+
+	//Enables the use of illumination in the scene
+	glEnable(GL_LIGHT4);
+    
     glMatrixMode(GL_MODELVIEW);
     glLoadIdentity();
+
+	//Calls draw function (explained throughly on its implementation)
     draw();
     
+	//Left frustum setting
     glMatrixMode(GL_PROJECTION);
     glLoadIdentity();
     glFrustum(-X, X, -Y, Y, Z, NORMALSIZE * 2);
     glTranslatef(EYEOFFSET, 0.0f, 0.0f);
     gluLookAt(cameraPos.x, cameraPos.y, cameraPos.z, lookAt.x, lookAt.y, lookAt.z, cameraUp.x, cameraUp.y, cameraUp.z);
     
-    
-	
-	//Back buffer for right eye
-    
+    //Back buffer for right eye
     if (stereo) {
         glDrawBuffer(GL_BACK_RIGHT);
         glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+		lights();
+		glEnable(GL_LIGHT4);
         
         glMatrixMode(GL_MODELVIEW);
         glLoadIdentity();
         
         draw();
         
+		//Right frustum setting
         glMatrixMode(GL_PROJECTION);
         glLoadIdentity();
         glFrustum(-X, X, -Y, Y, Z, NORMALSIZE * 2);
@@ -278,32 +248,39 @@ void display()
     glutSwapBuffers();
 }
 
-void ligths(){
-	GLfloat luz5Difusa[]     = { 1.0f, 1.0f, 0.0f, 1.0f };
-	GLfloat luz5Especular[]  = { 1.0f, 1.0f, 0.0f, 1.0f };  //luz AMARILLA
-	GLfloat luz5posicion[]   = { 0.0, NORMALSIZE, -Z, 0.0f }; //Posición luz 5
-    GLfloat luz5Direccion[]  = {0.0f, 0.0f,-1.0f};
 
-	
-    
+//Setting environment illumination
+void lights()
+{
+	//Setting the diffuse light (prevailing) with a white color
+	GLfloat diffuse[]  = {1, 1, 1, 1};
+
+	//Setting the specular light (minor tint) with a blue color
+	GLfloat specular[]  = {0, 0, 1, 1};
+
+	//Setting lights' position and direction so that it stands near the camera, illuminating towards the center of the frustum
+	GLfloat position[]   = {0, NORMALSIZE, -Z, 0};
+    GLfloat direction[]  = {0, 0,-1};
+
+	//Setting lights environment
     glEnable(GL_NORMALIZE);
     glEnable(GL_COLOR_MATERIAL);
     glEnable(GL_LIGHTING);
-    GLfloat lmodel_ambient[] = { 0.5, 0.5, 0.5, 1.0 };
+    GLfloat lmodel_ambient[] = {0.5, 0.5, 0.5, 1};
     glLightModelfv(GL_LIGHT_MODEL_AMBIENT, lmodel_ambient);
     glLightModeli(GL_LIGHT_MODEL_LOCAL_VIEWER, GL_FALSE);
 
-	glLightfv(GL_LIGHT4, GL_DIFFUSE,  luz5Difusa);
-	glLightfv(GL_LIGHT4, GL_SPECULAR, luz5Especular);
-	glLightfv(GL_LIGHT4, GL_POSITION, luz5posicion);
+	glLightfv(GL_LIGHT4, GL_DIFFUSE,  diffuse);
+	glLightfv(GL_LIGHT4, GL_SPECULAR, specular);
+	glLightfv(GL_LIGHT4, GL_POSITION, position);
 	glLightf (GL_LIGHT4, GL_SPOT_EXPONENT, 50.0f);
 	glLightf (GL_LIGHT4, GL_SPOT_CUTOFF, 100.0);
-	glLightfv(GL_LIGHT4, GL_SPOT_DIRECTION, luz5Direccion);
+	glLightfv(GL_LIGHT4, GL_SPOT_DIRECTION, direction);
 
-	GLfloat mat_ambient[]    = { 0.7f, 0.7f, 0.7f, 1.0f };
-	GLfloat mat_diffuse[]    = { 0.8f, 0.8f, 0.8f, 1.0f };
-	GLfloat mat_specular[]   = { 1.0f, 1.0f, 1.0f, 1.0f };
-	GLfloat high_shininess[] = { 100.0f };
+	GLfloat mat_ambient[]    = {0.7, 0.7, 0.7, 1};
+	GLfloat mat_diffuse[]    = {0.8, 0.8, 0.8, 1};
+	GLfloat mat_specular[]   = {1, 1, 1, 1};
+	GLfloat high_shininess[] = {100};
 
 	glMaterialfv(GL_FRONT, GL_AMBIENT,   mat_ambient);
     glMaterialfv(GL_FRONT, GL_DIFFUSE,   mat_diffuse);
@@ -311,28 +288,25 @@ void ligths(){
     glMaterialfv(GL_FRONT, GL_SHININESS, high_shininess);
 }
 
+
 //Draws Scene
 void draw()
 {
+	//Renders the textures presented in different objects to be shown to wards the camera
+	glFrontFace(GL_CCW);
+	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
 
-	glEnable(GL_DEPTH_TEST);	// Hidden surface removal
-	glFrontFace(GL_CCW);		// Counter clock-wise polygons face out
-	//glEnable(GL_CULL_FACE);		// Do not calculate inside of jet
-    //glDepthFunc(GL_LESS);
-
-	glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE); 
-	//glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_REPLACE); 
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
-	glClearColor(1.0f,1.0f,1.0f,1.0f );
-	glMatrixMode(GL_MODELVIEW);
-
-     //Shooting Room
+    //Shooting Room
     glPushMatrix();
+	//Translates the entire room towards behind the near frustum plane
     glTranslatef(0.0, 0.0, -Z);
+    
+	//Sets that textured shapes after this point are wrapped in the texture assigned
+	glBindTexture(GL_TEXTURE_2D, texture[0]);
 
 
-	//glBindTexture(GL_TEXTURE_2D, texture[0]);
-    glBindTexture(GL_TEXTURE_2D, texture[3]);
+	//BACK WALL
+	//Begins wrapping texture over shape
 	glEnable(GL_TEXTURE_2D);
     glBegin(GL_POLYGON);
     glTexCoord2f(1.0,0.0);              glVertex3f(NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
@@ -340,20 +314,21 @@ void draw()
     glTexCoord2f(0.0,1.0);              glVertex3f(-NORMALSIZE, NORMALSIZE, -NORMALSIZE);
     glTexCoord2f(0.0,0.0);              glVertex3f(-NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
     glEnd();
+
+	//Ends wrapping texture over shape
 	glDisable(GL_TEXTURE_2D);
 
-	//WALL RIGHT
-	glBindTexture(GL_TEXTURE_2D, texture[6]);
+	//RIGHT WALL
+	glBindTexture(GL_TEXTURE_2D, texture[2]);
 	glEnable(GL_TEXTURE_2D);    
     glBegin(GL_POLYGON);
     glTexCoord2f(1.0,0.0);              glVertex3f(NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
-    glTexCoord2f(0.0,0.0);             glVertex3f(NORMALSIZE, NORMALSIZE, -NORMALSIZE);
+    glTexCoord2f(1.0,1.0);             glVertex3f(NORMALSIZE, NORMALSIZE, -NORMALSIZE);
     glTexCoord2f(0.0,1.0);            glVertex3f(NORMALSIZE, NORMALSIZE, NORMALSIZE);
-    glTexCoord2f(1.0,1.0);            glVertex3f(NORMALSIZE, -NORMALSIZE, NORMALSIZE);
+    glTexCoord2f(0.0,0.0);            glVertex3f(NORMALSIZE, -NORMALSIZE, NORMALSIZE);
     glEnd();
-	glDisable(GL_TEXTURE_2D);
     
-	//WALL LEFT
+	//LEFT WALL
 	glEnable(GL_TEXTURE_2D);
 	glBegin(GL_POLYGON);
     glTexCoord2f(0.0,0.0);            glVertex3f(-NORMALSIZE, -NORMALSIZE, NORMALSIZE);
@@ -362,25 +337,19 @@ void draw()
     glTexCoord2f(1.0,0.0);            glVertex3f(-NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
     glEnd();
 	glDisable(GL_TEXTURE_2D);
-    
-	//roof
-    glBegin(GL_POLYGON);
-    trueColor(218, 148, 44);            glVertex3f(NORMALSIZE, NORMALSIZE, NORMALSIZE);
-    trueColor(77, 52, 15);              glVertex3f(NORMALSIZE, NORMALSIZE, -NORMALSIZE);
-    trueColor(77, 52, 15);              glVertex3f(-NORMALSIZE, NORMALSIZE, -NORMALSIZE);
-    trueColor(218, 148, 44);            glVertex3f(-NORMALSIZE, NORMALSIZE, NORMALSIZE);
-    glEnd();
-	/*glBindTexture(GL_TEXTURE_2D, texture[3]);
-	glEnable(GL_TEXTURE_2D);
+	
+	//TOP WALL
+	glBindTexture(GL_TEXTURE_2D, texture[3]);
+	glEnable(GL_TEXTURE_2D); 
     glBegin(GL_POLYGON);
     glTexCoord2f(1.0,0.0);              glVertex3f(NORMALSIZE, NORMALSIZE, NORMALSIZE);
     glTexCoord2f(1.0,1.0);              glVertex3f(NORMALSIZE, NORMALSIZE, -NORMALSIZE);
     glTexCoord2f(0.0,1.0);              glVertex3f(-NORMALSIZE, NORMALSIZE, -NORMALSIZE);
     glTexCoord2f(0.0,0.0);            glVertex3f(-NORMALSIZE, NORMALSIZE, NORMALSIZE);
     glEnd();
-	glDisable(GL_TEXTURE_2D);*/
-    
-	//FLOOR
+	glDisable(GL_TEXTURE_2D);
+
+	//BOTTOM WALL
     glBindTexture(GL_TEXTURE_2D, texture[5]);
 	glEnable(GL_TEXTURE_2D);
 	glBegin(GL_POLYGON);
@@ -389,61 +358,64 @@ void draw()
     glTexCoord2f(1.0, 0.0);            glVertex3f(NORMALSIZE, -NORMALSIZE, NORMALSIZE);
     glTexCoord2f(0.0, 0.0);            glVertex3f(-NORMALSIZE, -NORMALSIZE, NORMALSIZE);
     glTexCoord2f(0.0, 1.0);            glVertex3f(-NORMALSIZE, -NORMALSIZE, -NORMALSIZE);
-	
-		
     glEnd();
 	glDisable(GL_TEXTURE_2D);
     
-
     
-    
-
     //Shooting Targets
     for (int i = 0; i < VERSUS; i++)
     {
-		
-			
-        //If target has been shot, it is colored red; otherwise colored white
+        //If target has been shot, it is assigned a red texture, otherwise white
         if (dead[i] == true)
         {
-
-			glBindTexture(GL_TEXTURE_2D, texture[1]);
-			
-            
+            glBindTexture(GL_TEXTURE_2D, texture[1]);
         } else {
-			glBindTexture(GL_TEXTURE_2D, texture[0]);
-            //glColor3f(1.0, 1.0, 1.0);
+            glBindTexture(GL_TEXTURE_2D, texture[0]);
         }
-        glLoadName(i + 1);
         glPushMatrix();
         
         //Translate entire set of targets with a nearDelta value towards the screen.
-        
+		//Gets current target
         vector3d sphere = spheres[i];
         
+		//Marks its direction vector toward the FARBACK depth and normalizes it
         vector3d cruiseDirection = farBack - sphere;
         cruiseDirection.normalize();
-        
-		//Initialization
-		
 
+		//Enables the wrapping of texture with a solid shape
 		glEnable(GL_TEXTURE_2D);
 		glEnable(GL_TEXTURE_GEN_S);
 		glEnable(GL_TEXTURE_GEN_T);
+        
+		//Sets the behavior of the targets movemnt depending of wether it was shot or not
+		if (dead[i] == true)
+		{
+			//If it has been shot, it rotates bottomwards and disappears towards the scene
+			glTranslatef(sphere.x + cruiseDirection.x * firePlace[i], sphere.y + cruiseDirection.y * firePlace[i] - (nearDelta - firePlace[i]), sphere.z + cruiseDirection.z * firePlace[i]);
+		} else {
+			//If it has not been shot, it continues its trayectory determined with its original position and advances its direction vector multiplied by nearDelta
+			glTranslatef(sphere.x + cruiseDirection.x * nearDelta, sphere.y + cruiseDirection.y * nearDelta, sphere.z + cruiseDirection.z * nearDelta);
+		}
 
-
-        glTranslatef(sphere.x + cruiseDirection.x * nearDelta, sphere.y + cruiseDirection.y * nearDelta, sphere.z + cruiseDirection.z * nearDelta);
+        //Draws a sphere with a BUBBLE radius
         glutSolidSphere(BUBBLE, 16, 16);
 
+		//Disables the wrapping of texture with a solid shape
 		glDisable(GL_TEXTURE_GEN_S);
 		glDisable(GL_TEXTURE_GEN_T);
 		glDisable(GL_TEXTURE_2D);
-
-        
+		
         glPopMatrix();
     }
     
     glPopMatrix();
+}
+
+void reshape(int width, int height)
+{
+	glViewport (0, 0, (GLsizei) width, (GLsizei) height); 
+	screenWidth = width;
+	screenHeight = height;
 }
 
 
@@ -452,14 +424,12 @@ void keyboard(unsigned char key, int x, int y)
 {
     switch(key)
     {
+		case 'r':
+            createEnemies();
+			nearDelta = 0;
         case 's':
             glutIdleFunc(incomingEnemies);
             break;
-        case 'r':
-            createEnemies();
-            for (int i = 0; i < VERSUS; i++) {
-                dead[i] = false;
-            }
         case 'p':
             glutIdleFunc(NULL);
             break;
@@ -504,7 +474,10 @@ void mouse(int button, int state, int x, int y)
                 
                 int i;
                 
-                float longShot = - 99999999;
+				//Windows
+				float longShot = - 100000;
+				//MAC
+                //float longShot = - INFINITY;
                 int nearIndex = VERSUS;
                 
                 for (i = 0; i < VERSUS; i++) {
@@ -583,6 +556,7 @@ void mouse(int button, int state, int x, int y)
                 
                 if (nearIndex < VERSUS) {
                     dead[nearIndex] = true;
+					firePlace[nearIndex] = nearDelta;
                 }
                 
                 glutPostRedisplay();
@@ -594,8 +568,11 @@ void mouse(int button, int state, int x, int y)
 //At game start, decides randomly the position of all targets to be created inside a certain boundary limit
 void createEnemies()
 {
+
     for (int i = 0; i < VERSUS; i++)
     {
+		dead[i] = false;
+		firePlace[i] = 0;
         float x = rand() / float(RAND_MAX) * (X - BUBBLE) * 2 - (X - BUBBLE);
         float y = rand() / float(RAND_MAX) * (Y - BUBBLE) * 2 - (Y - BUBBLE);
         float z = (rand() / float(RAND_MAX) - 1.5) * BARRACKS - BUBBLE;
@@ -608,7 +585,7 @@ void createEnemies()
 //Idle Func: While the game is running every time is called increases the nearDelta value moving the targets closer to the screen
 void incomingEnemies()
 {
-    nearDelta += 0.035;
+    nearDelta += VELOCITY;
     glutPostRedisplay();
 }
 
@@ -619,3 +596,67 @@ void trueColor(int red, int green, int blue)
     glColor3f(red/255.0, green/255.0, blue/255.0);
 }
 
+
+
+// Routine to read a bitmap file.
+// Works only for uncompressed bmp files of 24-bit color.
+BitMapFile *getBMPData(string filename)
+{
+   BitMapFile *bmp = new BitMapFile;
+   unsigned int size, offset, headerSize;
+  
+   // Read input file name.
+   ifstream infile(filename.c_str(), ios::binary);
+ 
+   // Get the starting point of the image data.
+   infile.seekg(10);
+   infile.read((char *) &offset, 4); 
+   
+   // Get the header size of the bitmap.
+   infile.read((char *) &headerSize,4);
+
+   // Get width and height values in the bitmap header.
+   infile.seekg(18);
+   infile.read( (char *) &bmp->sizeX, 4);
+   infile.read( (char *) &bmp->sizeY, 4);
+
+   // Allocate buffer for the image.
+   size = bmp->sizeX * bmp->sizeY * 24;
+   bmp->data = new unsigned char[size];
+
+   // Read bitmap data.
+   infile.seekg(offset);
+   infile.read((char *) bmp->data , size);
+   
+   // Reverse color from bgr to rgb.
+   int temp;
+   for (int i = 0; i < size; i += 3){ 
+      temp = bmp->data[i];
+	  bmp->data[i] = bmp->data[i + 2];
+	  bmp->data[i + 2] = temp;
+   }
+
+   return bmp;
+}
+
+// Load external textures.
+void loadExternalTextures(string filename, int TexIndex)
+{
+	BitMapFile *image[1];		// Local storage for bmp image data.
+	image[0] = getBMPData(filename);		// Load the textures.
+
+	// Activate texture index texture[0]. 
+    glBindTexture(GL_TEXTURE_2D, texture[TexIndex]);
+
+    // Set texture parameters for wrapping.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S,  GL_REPEAT);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+
+    // Set texture parameters for filtering.
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+
+    // Specify an image as the texture to be bound with the currently active texture index.
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, image[0]->sizeX, image[0]->sizeY, 0, 
+	            GL_RGB, GL_UNSIGNED_BYTE, image[0]->data);	
+}
